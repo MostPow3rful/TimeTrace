@@ -1,81 +1,284 @@
 package database
 
 import (
+	"fmt"
+	"strconv"
+	"sync"
+	"time"
+
 	"github.com/zurvan-lab/TimeTrace/config"
 )
 
 type Database struct {
 	Sets   Sets
 	Config *config.Config
+
+	sync.RWMutex
 }
 
-func Init(path string) *Database {
+func Init(cfg *config.Config) *Database {
 	return &Database{
-		Sets:   make(Sets),
-		Config: config.LoadFromFile(path),
+		Sets:   make(Sets, 1024),
+		Config: cfg,
 	}
 }
 
-func (db *Database) AddSet(name string) string {
-	db.Sets[name] = make(Set)
-	return "DONE"
+func (db *Database) SetsMap() Sets {
+	return db.Sets
 }
 
-func (db *Database) AddSubSet(set, name string) string {
-	s, ok := db.Sets[set]
+// ! TQL Commands.
+func (db *Database) Connect(args []string) string {
+	db.RLock()
+	defer db.RUnlock()
+
+	if len(args) != 2 {
+		return INVALID
+	}
+
+	for _, u := range db.Config.Users {
+		if u.Name == args[0] && u.Password == args[1] {
+			return OK
+		}
+	}
+
+	return INVALID
+}
+
+func (db *Database) Ping(_ []string) string {
+	return PONG
+}
+
+func (db *Database) AddSet(args []string) string {
+	db.Lock()
+	defer db.Unlock()
+
+	if len(args) != 1 {
+		return INVALID
+	}
+
+	db.Sets[args[0]] = make(Set) // args[0] is set name. see: TQL docs.
+
+	return OK
+}
+
+func (db *Database) AddSubSet(args []string) string {
+	db.Lock()
+	defer db.Unlock()
+
+	if len(args) != 2 {
+		return INVALID
+	}
+
+	s, ok := db.Sets[args[0]] // set name args[0]
 	if !ok {
-		return "SETNF"
+		return SET_NOT_FOUND
 	}
-	s[name] = make(SubSet, 0)
-	return "DONE"
+
+	s[args[1]] = make(SubSet, 0) // subset name args[1]
+
+	return OK
 }
 
-func (db *Database) PushElement(set, subset string, e Element) string {
-	_, ok := db.Sets[set][subset]
+func (db *Database) PushElement(args []string) string {
+	db.Lock()
+	defer db.Unlock()
+
+	if len(args) != 4 {
+		return INVALID
+	}
+
+	setName := args[0]
+	subSetName := args[1]
+	elementValue := args[2]
+	timeStr := args[3]
+
+	_, ok := db.Sets[setName][subSetName]
 	if !ok {
-		return "SUBSETNF"
+		return SUB_SET_NOT_FOUND
 	}
-	db.Sets[set][subset] = append(db.Sets[set][subset], e)
-	return "DONE"
+
+	timestamp, err := strconv.ParseInt(timeStr, 10, 64)
+	if err != nil {
+		return INVALID
+	}
+
+	t := time.Unix(timestamp, 0)
+	e := NewElement(elementValue, t)
+
+	db.Sets[setName][subSetName] = append(db.Sets[setName][subSetName], e)
+
+	return OK
 }
 
-func (db *Database) DropSet(name string) string {
-	_, ok := db.Sets[name]
+func (db *Database) DropSet(args []string) string {
+	db.Lock()
+	defer db.Unlock()
+
+	if len(args) != 1 {
+		return INVALID
+	}
+
+	setName := args[0]
+	_, ok := db.Sets[setName]
+
 	if !ok {
-		return "SETNF"
+		return SET_NOT_FOUND
 	}
-	delete(db.Sets, name)
-	return "DONE"
+
+	delete(db.Sets, setName)
+
+	return OK
 }
 
-func (db *Database) DropSubSet(set, subset string) string {
-	_, ok := db.Sets[set][subset]
+func (db *Database) DropSubSet(args []string) string {
+	db.Lock()
+	defer db.Unlock()
+
+	if len(args) != 2 {
+		return INVALID
+	}
+
+	setName := args[0]
+	subSetName := args[1]
+
+	_, ok := db.Sets[setName][subSetName]
 	if !ok {
-		return "SUBETNF"
+		return SUB_SET_NOT_FOUND
 	}
-	delete(db.Sets[set], subset)
-	return "DONE"
+
+	delete(db.Sets[setName], subSetName)
+
+	return OK
 }
 
-func (db *Database) CleanSets() string {
+func (db *Database) CleanSets(_ []string) string {
+	db.Lock()
+	defer db.Unlock()
+
 	db.Sets = make(Sets)
-	return "DONE"
+
+	return OK
 }
 
-func (db *Database) CleanSet(name string) string {
-	_, ok := db.Sets[name]
-	if !ok {
-		return "SETNF"
+func (db *Database) CleanSet(args []string) string {
+	db.Lock()
+	defer db.Unlock()
+
+	if len(args) != 1 {
+		return INVALID
 	}
-	db.Sets[name] = make(Set)
-	return "DONE"
+
+	setName := args[0]
+
+	_, ok := db.Sets[setName]
+	if !ok {
+		return SET_NOT_FOUND
+	}
+
+	db.Sets[setName] = make(Set)
+
+	return OK
 }
 
-func (db *Database) CleanSubSet(set, subset string) string {
-	_, ok := db.Sets[set][subset]
-	if !ok {
-		return "SUBETNF"
+func (db *Database) CleanSubSet(args []string) string {
+	db.Lock()
+	defer db.Unlock()
+
+	if len(args) != 2 {
+		return INVALID
 	}
-	db.Sets[set][subset] = make(SubSet, 0)
-	return "DONE"
+
+	setName := args[0]
+	subSetName := args[1]
+
+	_, ok := db.Sets[setName][subSetName]
+	if !ok {
+		return SUB_SET_NOT_FOUND
+	}
+
+	db.Sets[setName][subSetName] = make(SubSet, 0)
+
+	return OK
+}
+
+func (db *Database) CountSets(_ []string) string {
+	db.RLock()
+	defer db.RUnlock()
+
+	i := 0
+	for range db.Sets {
+		i++
+	}
+
+	return fmt.Sprint(i)
+}
+
+func (db *Database) CountSubSets(args []string) string {
+	db.RLock()
+	defer db.RUnlock()
+
+	if len(args) != 1 {
+		return INVALID
+	}
+
+	set, ok := db.Sets[args[0]]
+	if !ok {
+		return SET_NOT_FOUND
+	}
+
+	i := 0
+	for range set {
+		i++
+	}
+
+	return fmt.Sprint(i)
+}
+
+func (db *Database) CountElements(args []string) string {
+	db.RLock()
+	defer db.RUnlock()
+
+	if len(args) != 2 {
+		return INVALID
+	}
+
+	subSet, ok := db.Sets[args[0]][args[1]]
+	if !ok {
+		return SUB_SET_NOT_FOUND
+	}
+
+	i := 0
+	for range subSet {
+		i++
+	}
+
+	return fmt.Sprint(i)
+}
+
+func (db *Database) GetElements(args []string) string {
+	db.RLock()
+	defer db.RUnlock()
+
+	if len(args) < 2 {
+		return INVALID
+	}
+
+	subSet, ok := db.Sets[args[0]][args[1]]
+	if !ok {
+		return SUB_SET_NOT_FOUND
+	}
+
+	if len(args) == 3 {
+		n, err := strconv.Atoi(args[2])
+		if err != nil || len(subSet) < n {
+			return INVALID
+		}
+
+		lastN := subSet[len(subSet)-n:]
+
+		return lastN.String()
+	}
+
+	return subSet.String()
 }

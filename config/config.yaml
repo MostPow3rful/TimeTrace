@@ -5,7 +5,12 @@ server:
   port: "7070"
 
 log:
-  path: ttrace.log
+  path: log.ttrace
+  colorful: true
+  compress: true
+  max_age: 1
+  max_backups: 10
+  max_log_size: 10
 
 users:
 - name: root
@@ -18,10 +23,10 @@ users:
 #   - name: root
 #     password: super_secret_password
 #     cmd:
-#       - * # all commands.
+#       - '*' # all commands.
 #   - name: developer
 #     password: secret_password
 #     cmd:
-#       - GET
-#       - PUSH
-#       - DEL
+#       - 'GET'
+#       - 'PUSH'
+#       - 'DEL'

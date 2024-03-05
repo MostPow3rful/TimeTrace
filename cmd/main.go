@@ -1,12 +1,23 @@
 package main
 
 import (
-	"os"
-
-	"github.com/zurvan-lab/TimeTrace/core/database"
+	"github.com/spf13/cobra"
+	timetrace "github.com/zurvan-lab/TimeTrace"
+	"github.com/zurvan-lab/TimeTrace/cmd/commands"
 )
 
 func main() {
-	database := database.Init(os.Args[0])
-	database.AddSet("test")
+	rootCmd := &cobra.Command{
+		Use:     "ttrace",
+		Version: timetrace.StringVersion(),
+	}
+
+	commands.RunCommand(rootCmd)
+	commands.REPLCommand(rootCmd)
+	commands.PingCommand(rootCmd)
+
+	err := rootCmd.Execute()
+	if err != nil {
+		commands.Dead(rootCmd, err)
+	}
 }

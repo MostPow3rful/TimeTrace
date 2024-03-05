@@ -25,3 +25,9 @@
 # OS-specific files
 .DS_Store
 Thumbs.db
+
+# dev files
+cmd/config.yaml
+/client
+log.ttrace
+build/
